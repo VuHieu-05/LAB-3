@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nha kinh - TH03 (ban demo)</title>
+<style>
+  body{font-family:system-ui,sans-serif;margin:0;padding:16px;background:#f3f5f7;color:#1c2630}
+  .card{max-width:480px;margin:0 auto 12px;background:#fff;border-radius:12px;padding:16px;box-shadow:0 1px 3px #0002}
+  h1{font-size:18px;margin:0 0 4px}
+  .sub{color:#667;font-size:13px;margin-bottom:8px}
+  #badge{display:inline-block;padding:8px 20px;border-radius:999px;font-size:22px;font-weight:700;color:#fff;background:#6b7785}
+  .DUNG{background:#6b7785!important}.CHAY{background:#1f9d55!important}.LOI{background:#d64545!important}
+  .row{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #eef0f2;font-size:15px}
+  .row:last-child{border:0}
+  .bar{height:10px;background:#e3e7eb;border-radius:6px;overflow:hidden;margin:10px 0 2px}
+  #fill{height:100%;width:0;background:#1f9d55;transition:width .4s}
+  button,select{font-size:16px;padding:12px 14px;border-radius:8px;border:0;margin:4px 2px}
+  button{color:#fff;background:#2f6fed;font-weight:600}
+  button:disabled{opacity:.45}
+  #bOff{background:#6b7785}#bBad{background:#b5792a;font-size:13px}
+  select{background:#e9edf1}
+  #msg{font-size:13px;color:#445;margin-top:8px;min-height:18px}
+  .demo{border:2px dashed #b5792a;background:#fff8ec}
+  .demo b{color:#b5792a}
+  .demo button{background:#b5792a;font-size:13px;padding:8px 10px}
+</style>
+</head>
+<body>
+
+<div class="card demo">
+  <b>BAN DEMO (gia lap tren trinh duyet)</b>
+  <div class="sub">Khong can ESP32. Logic mo phong dung nhu firmware: gioi han 20 s, LOI/het gio luon ve DUNG.</div>
+  <button id="simSensor" onclick="toggleSensor()">Rut cam bien DHT11</button>
+  <button onclick="pressButton()">Bam nut (gia lap ISR)</button>
+</div>
+
+<div class="card">
+  <h1>Dieu khien thiet bi an toan</h1>
+  <div class="sub">CSE3069 - Bai 3 | tai: LED_R (GPIO26)</div>
+  <span id="badge">...</span>
+  <div class="bar"><div id="fill"></div></div>
+  <div class="sub" id="left"></div>
+  <div>
+    <button id="bOn" onclick="cmd('ON')">BAT (ON)</button>
+    <button id="bOff" onclick="cmd('OFF')">TAT (OFF)</button>
+  </div>
+  <div>
+    Duty:
+    <select id="duty" onchange="cmd('DUTY '+this.value)">
+      <option value="25">25%</option><option value="50">50%</option>
+      <option value="90">90%</option><option value="100" selected>100%</option>
+    </select>
+    <button id="bBad" onclick="cmd('ABC')">Gui lenh sai (thu ca 3)</button>
+  </div>
+  <div id="msg"></div>
+</div>
+<div class="card">
+  <div class="row"><span>Nhiet do</span><b id="t">-</b></div>
+  <div class="row"><span>Do am</span><b id="h">-</b></div>
+  <div class="row"><span>Cam bien</span><b id="s">-</b></div>
+  <div class="row"><span>Gioi han chay</span><b id="max">-</b></div>
+  <div class="row"><span>So lan ngat nut</span><b id="btn">-</b></div>
+  <div class="row"><span>Timer: so tick</span><b id="tick">-</b></div>
+  <div class="row"><span>Timer: chu ky TB</span><b id="avg">-</b></div>
+</div>
+
+<script>
+/* ===== PHAN GIA LAP "ESP32" (chi co trong ban demo) ===== */
+const MAX_RUN_MS = 20000, ERROR_HOLD_MS = 2000;
+const sim = {state:'DUNG', runStart:0, errStart:0, duty:100, sensorOk:true,
+             temp:28.5, hum:65, btn:0, ticks:0, msg:'San sang'};
+
+function setState(next, reason){
+  if (sim.state === next) return;
+  sim.msg = sim.state + ' -> ' + next + ' | ' + reason;
+  sim.state = next;
+  if (next === 'CHAY') sim.runStart = Date.now();
+  if (next === 'LOI')  sim.errStart = Date.now();
+}
+function updateState(){                       // giong updateState() trong firmware
+  if (sim.state === 'CHAY'){
+    if (!sim.sensorOk) setState('LOI', 'du lieu cam bien khong hop le (NaN)');
+    else if (Date.now() - sim.runStart >= MAX_RUN_MS) setState('DUNG', 'het thoi gian toi da');
+  } else if (sim.state === 'LOI'){
+    if (Date.now() - sim.errStart >= ERROR_HOLD_MS) setState('DUNG', 'het thoi gian giu LOI, ve trang thai an toan');
+  }
+}
+function handleCommand(raw){                  // giong handleCommand() trong firmware
+  const c = raw.trim().toUpperCase();
+  if (!c) return;
+  let invalid = false;
+  if (c === 'ON'){
+    if (sim.state === 'DUNG' && sim.sensorOk) setState('CHAY', 'lenh ON hop le');
+    else if (sim.state === 'DUNG') sim.msg = 'Tu choi ON: cam bien chua hop le';
+    else sim.msg = 'Bo qua ON: he khong o trang thai DUNG';
+  } else if (c === 'OFF'){
+    setState('DUNG', 'lenh OFF');
+  } else if (c.startsWith('DUTY ')){
+    const d = parseInt(c.slice(5), 10);
+    if (d >= 0 && d <= 100){ sim.duty = d; sim.msg = 'Duty = ' + d + '%'; }
+    else invalid = true;
+  } else invalid = true;
+  if (invalid){
+    if (sim.state === 'CHAY') setState('LOI', 'lenh sai dinh dang khi dang CHAY');
+    else sim.msg = 'Lenh khong hop le, bo qua';
+  }
+}
+function status(){
+  const left = sim.state === 'CHAY' ? Math.max(0, MAX_RUN_MS - (Date.now() - sim.runStart)) : 0;
+  return {state:sim.state, runLeftMs:left, maxRunMs:MAX_RUN_MS, duty:sim.duty, sensorOk:sim.sensorOk,
+          temp: sim.sensorOk ? sim.temp : null, hum: sim.sensorOk ? sim.hum : null,
+          buttonCount:sim.btn, timerTicks:sim.ticks, avgPeriodUs: sim.ticks>1 ? 1000000.3 : 0, msg:sim.msg};
+}
+setInterval(updateState, 100);
+setInterval(()=>{ sim.ticks++; sim.temp = 28 + Math.round(Math.random()*8)/10; sim.hum = 64 + Math.round(Math.random()*3); }, 1000);
+
+function toggleSensor(){
+  sim.sensorOk = !sim.sensorOk;
+  document.getElementById('simSensor').textContent = sim.sensorOk ? 'Rut cam bien DHT11' : 'Cam lai cam bien DHT11';
+  sim.msg = sim.sensorOk ? 'Cam bien: doc lai duoc' : 'Cam bien: doc ra NaN';
+  render(status());
+}
+function pressButton(){ sim.btn++; render(status()); }
+
+/* ===== GIAO DIEN (giong het trang web trong firmware) ===== */
+function $(i){return document.getElementById(i)}
+function render(d){
+  $('badge').textContent = d.state;
+  $('badge').className = d.state;
+  $('fill').style.width = d.state==='CHAY' ? (100*d.runLeftMs/d.maxRunMs)+'%' : '0';
+  $('left').textContent = d.state==='CHAY' ? 'Con '+(d.runLeftMs/1000).toFixed(1)+' s truoc khi tu dung' : 'Tai dang tat';
+  $('t').textContent = d.temp===null ? 'NaN' : d.temp.toFixed(1)+' °C';
+  $('h').textContent = d.hum===null ? 'NaN' : d.hum.toFixed(0)+' %';
+  $('s').textContent = d.sensorOk ? 'Hop le' : 'LOI / khong doc duoc';
+  $('max').textContent = (d.maxRunMs/1000)+' s';
+  $('btn').textContent = d.buttonCount;
+  $('tick').textContent = d.timerTicks;
+  $('avg').textContent = d.avgPeriodUs>0 ? (d.avgPeriodUs/1000).toFixed(3)+' ms' : '-';
+  $('msg').textContent = d.msg;
+  $('bOn').disabled = !(d.state==='DUNG' && d.sensorOk);
+}
+function poll(){ render(status()); }
+function cmd(c){ handleCommand(c); render(status()); }
+poll(); setInterval(poll, 500);
+</script>
+</body>
+</html>
